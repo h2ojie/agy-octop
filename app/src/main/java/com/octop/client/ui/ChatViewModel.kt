@@ -600,6 +600,39 @@ class ChatViewModel : ViewModel() {
         }
     }
 
+    fun onForegroundResume() {
+        val agent = _currentAgent.value ?: return
+        val thread = _currentThread.value
+        val tid = thread?.threadId ?: _agentActiveThreadId[agent.agentId]
+        if (!tid.isNullOrBlank() && !tid.startsWith("draft_")) {
+            val ws = getOrCreateWs(agent.agentId, tid)
+            if (ws.isConnected) {
+                ws.subscribe(tid)
+            } else {
+                ws.connect(tid)
+            }
+            loadHistory(agent.agentId, tid)
+            loadThreadsForAgent(agent.agentId)
+        }
+    }
+
+    fun refreshCurrentThread(showToast: Boolean = false) {
+        val agent = _currentAgent.value ?: return
+        val thread = _currentThread.value
+        val tid = thread?.threadId ?: _agentActiveThreadId[agent.agentId]
+        if (!tid.isNullOrBlank() && !tid.startsWith("draft_")) {
+            viewModelScope.launch {
+                val ws = getOrCreateWs(agent.agentId, tid)
+                if (ws.isConnected) ws.subscribe(tid) else ws.connect(tid)
+                loadHistory(agent.agentId, tid)
+                loadThreadsForAgent(agent.agentId)
+                if (showToast) {
+                    _toastMessage.value = "已同步最新会话记录"
+                }
+            }
+        }
+    }
+
     private fun loadHistory(agentId: String, threadId: String) {
         viewModelScope.launch {
             try {
@@ -634,6 +667,13 @@ class ChatViewModel : ViewModel() {
                 val allDtos = allRawPages.flatten()
                 val serverMessages = processDialogueHistory(allDtos, agentId, threadId)
                 val list = _threadMessagesCache.getOrPut(threadId) { mutableListOf() }
+
+                // 核心自愈：若服务端明确指示本轮已结束 (turnActiveOnServer == false)，
+                // 立即解除本地可能因切后台/断线漏收 done 帧而残留的流式锁与看门狗
+                if (!turnActiveOnServer) {
+                    _streamingThreads.remove(threadId)
+                    stopStreamingWatchdog(threadId)
+                }
                 val isStreamingNow = _streamingThreads.contains(threadId)
 
                 synchronized(list) {

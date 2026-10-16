@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SettingsSuggest
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -41,6 +42,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.octop.client.data.model.AttachmentStatus
 import com.octop.client.data.network.NetworkConfig
@@ -58,6 +62,20 @@ fun ChatScreen(
     val keyboardController = LocalSoftwareKeyboardController.current
     val coroutineScope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+
+    // 前台恢复自愈：当用户从后台/微信/锁屏重新回到应用时，自动触发会话同步与对齐
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.onForegroundResume()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
     val listState = rememberLazyListState()
 
     val agents by viewModel.agents.collectAsState()
@@ -317,7 +335,21 @@ fun ChatScreen(
 
                         Spacer(modifier = Modifier.width(4.dp))
 
-                        // 3. 右侧操作菜单按钮 (尺寸小巧精致 36dp)
+                        // 3. 右侧操作区：刷新按钮 + 更多菜单按钮 (尺寸小巧精致 36dp)
+                        IconButton(
+                            onClick = {
+                                viewModel.refreshCurrentThread(showToast = true)
+                            },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "刷新当前会话",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(19.dp)
+                            )
+                        }
+
                         Box {
                             IconButton(
                                 onClick = { showTopMenu = true },
@@ -334,6 +366,14 @@ fun ChatScreen(
                                 expanded = showTopMenu,
                                 onDismissRequest = { showTopMenu = false }
                             ) {
+                                DropdownMenuItem(
+                                    text = { Text("刷新当前会话") },
+                                    leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null) },
+                                    onClick = {
+                                        showTopMenu = false
+                                        viewModel.refreshCurrentThread(showToast = true)
+                                    }
+                                )
                                 DropdownMenuItem(
                                     text = { Text("新建会话") },
                                     leadingIcon = { Icon(Icons.Default.AddComment, contentDescription = null) },
