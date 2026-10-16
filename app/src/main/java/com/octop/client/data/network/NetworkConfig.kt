@@ -40,17 +40,22 @@ object NetworkConfig {
 
     fun getWsUrl(agentId: String): String {
         val httpUrl = baseUrl.toHttpUrlOrNull() ?: return ""
-        val scheme = if (httpUrl.isHttps) "wss" else "ws"
         val cleanAgentId = agentId.trim().ifEmpty { "default" }
+        // 注意：OkHttp 的 HttpUrl 规范仅允许 http/https，直接 scheme("wss") 会抛出 IllegalArgumentException 导致闪退
+        // 因此先通过 HttpUrl 安全构建路径与参数，再安全转换协议头
         val builder = httpUrl.newBuilder()
-            .scheme(scheme)
             .addPathSegments("api/agents")
             .addPathSegment(cleanAgentId)
             .addPathSegments("chat/ws")
         if (!authToken.isNullOrBlank()) {
             builder.addQueryParameter("token", authToken)
         }
-        return builder.build().toString()
+        val builtUrl = builder.build().toString()
+        return if (httpUrl.isHttps) {
+            builtUrl.replaceFirst("https://", "wss://")
+        } else {
+            builtUrl.replaceFirst("http://", "ws://")
+        }
     }
 
     fun getMediaPreviewUrl(agentId: String, workspacePath: String, mimeType: String? = null): String {
