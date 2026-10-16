@@ -38,17 +38,34 @@ data class ResolvedModel(
         fun extractProvider(raw: String): String {
             if (raw.isBlank()) return ""
             val trimmed = raw.trim()
-            return when {
+            val candidate = when {
                 trimmed.contains("/") -> trimmed.substringBefore("/").trim()
                 trimmed.contains(" · ") -> trimmed.substringBefore(" · ").trim()
                 trimmed.endsWith("-cli") -> "cli"
                 else -> ""
             }
+            return candidate.lowercase()
         }
 
         fun formatModelName(raw: String): String {
             if (raw.isBlank()) return ""
-            val clean = raw.trim().removePrefix("cli/").removePrefix("ice/").removeSuffix("-cli")
+            // 若包含斜杠（无论单层如 "ice/gpt" 还是多层如 "ice / Ice / GPT"），
+            // 剥离掉所有前置的服务商前缀，取最后一部分作为纯模型标识
+            val pure = if (raw.contains("/")) {
+                raw.substringAfterLast("/").trim()
+            } else {
+                raw.trim()
+            }
+            var clean = pure
+            val prefixes = listOf("cli/", "ice/", "cli /", "ice /")
+            for (p in prefixes) {
+                if (clean.startsWith(p, ignoreCase = true)) {
+                    clean = clean.substring(p.length).trim()
+                }
+            }
+            if (clean.endsWith("-cli", ignoreCase = true)) {
+                clean = clean.removeSuffix("-cli").trim()
+            }
             val lower = clean.lowercase()
             return when {
                 lower.startsWith("gemini-3.8-flash") || lower.startsWith("gemini 3.8 flash") -> "Gemini 3.8 Flash"
@@ -74,7 +91,7 @@ data class ResolvedModel(
 
         fun formatModelWithProvider(raw: String, provider: String? = null): String {
             if (raw.isBlank()) return ""
-            val prov = provider?.takeIf { it.isNotBlank() } ?: extractProvider(raw)
+            val prov = provider?.trim()?.takeIf { it.isNotBlank() } ?: extractProvider(raw)
             val name = formatModelName(raw)
             return if (prov.isNotBlank()) "$prov / $name" else name
         }

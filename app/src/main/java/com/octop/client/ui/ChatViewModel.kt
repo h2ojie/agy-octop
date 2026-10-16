@@ -1099,7 +1099,7 @@ class ChatViewModel : ViewModel() {
                     list[list.size - 1] = last.copy(
                         isStreaming = false,
                         isThinkingExpanded = false,
-                        modelName = if (!last.modelName.isNullOrBlank()) ResolvedModel.formatModelName(last.modelName) else fallbackModel
+                        modelName = if (!last.modelName.isNullOrBlank()) ResolvedModel.formatModelWithProvider(last.modelName) else fallbackModel
                     )
                 }
             }
