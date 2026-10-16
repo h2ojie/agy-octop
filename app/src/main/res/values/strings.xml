@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">Octop</string>
+    <string name="new_thread">新建会话</string>
+    <string name="context_stats">查看上下文统计</string>
+    <string name="model_management">模型管理</string>
+    <string name="input_hint">请输入消息...</string>
+    <string name="fullscreen_input_title">全屏输入模式</string>
+    <string name="collapse">收起</string>
+    <string name="send">发送</string>
+</resources>

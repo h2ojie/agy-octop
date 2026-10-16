@@ -1,0 +1,9 @@
+<resources>
+    <color name="primary">#10A37F</color>
+    <color name="primary_dark">#0E8A6B</color>
+    <color name="user_bubble">#DCF8C6</color>
+    <color name="ai_bubble_light">#F0F2F5</color>
+    <color name="ai_bubble_dark">#23272E</color>
+    <color name="surface_dark">#1E2229</color>
+    <color name="window_background_dark">#121418</color>
+</resources>
