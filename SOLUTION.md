@@ -197,12 +197,12 @@ server {
 
 ### 6.2 自动化分发矩阵
 编译完成后，安装包与源码包会自动同步至以下分发节点：
-1. **本地工程目录**：`/Users/konglingling/gemini/octop-android/octop-v1.0.31.apk`
+1. **本地工程目录**：`/Users/konglingling/agy-octop/octop-v1.0.32.apk`
 2. **局域网共享工具盘**：
-   - 最新版本：`/Volumes/tools/apk/octop-v1.0.31.apk`
+   - 最新版本：`/Volumes/tools/apk/octop-v1.0.32.apk`
    - 兼容快捷路径：`/Volumes/tools/apk/octop-v1.0.0.apk`
 3. **Google Drive 云端硬盘 (`octop-apk/`)**：
-   - `octop-v1.0.31.apk`
+   - `octop-v1.0.32.apk`
    - `octop-v1.0.0.apk`
    - 完整工程源码包：`octop-android.zip`
 4. **新加坡中转节点公网直链**：
