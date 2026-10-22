@@ -1,7 +1,11 @@
 package com.octop.client.ui
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -148,6 +152,46 @@ fun ChatScreen(
 
     // 拍照临时 URI 状态
     var tempCameraUri by remember { mutableStateOf<Uri?>(null) }
+
+    // 返回键统一拦截：
+    // 1. 若处于大图预览，则关闭大图；
+    // 2. 若处于模型选择 BottomSheet，则关闭 BottomSheet；
+    // 3. 若处于抽屉栏（专家矩阵），则按返回键关闭抽屉回到聊天主窗口；
+    // 4. 处于聊天主窗口时，按第一次返回弹 Toast 提示「再按一次退出应用」，2 秒内连续按第二次才退出程序。
+    val activity = remember(context) { context.findActivity() }
+    var lastBackPressTime by remember { mutableLongStateOf(0L) }
+    var backToast by remember { mutableStateOf<Toast?>(null) }
+
+    LaunchedEffect(drawerState.isOpen) {
+        if (!drawerState.isOpen) {
+            lastBackPressTime = 0L
+        }
+    }
+
+    BackHandler(enabled = true) {
+        if (previewImageModel != null) {
+            previewImageModel = null
+        } else if (showModelBottomSheet) {
+            showModelBottomSheet = false
+        } else if (drawerState.isOpen || drawerState.targetValue == DrawerValue.Open) {
+            lastBackPressTime = 0L
+            focusManager.clearFocus()
+            keyboardController?.hide()
+            coroutineScope.launch { drawerState.close() }
+        } else {
+            val currentTime = System.currentTimeMillis()
+            if (currentTime - lastBackPressTime < 2000L) {
+                backToast?.cancel()
+                activity?.finish()
+            } else {
+                lastBackPressTime = currentTime
+                backToast?.cancel()
+                backToast = Toast.makeText(context, "再按一次退出应用", Toast.LENGTH_SHORT).apply {
+                    show()
+                }
+            }
+        }
+    }
 
     // 相册图片选择器 (支持多选，最大 9 张，Android 14 免存储权限)
     val pickImagesLauncher = rememberLauncherForActivityResult(
@@ -689,4 +733,10 @@ fun ChatScreen(
             viewModel.selectModel(modelRef, effort)
         }
     )
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }

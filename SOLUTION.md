@@ -197,12 +197,12 @@ server {
 
 ### 6.2 自动化分发矩阵
 编译完成后，安装包与源码包会自动同步至以下分发节点：
-1. **本地工程目录**：`/Users/konglingling/agy-octop/octop-v1.0.34.apk`
+1. **本地工程目录**：`/Users/konglingling/agy-octop/octop-v1.0.35.apk`
 2. **局域网共享工具盘**：
-   - 最新版本：`/Volumes/tools/apk/octop-v1.0.34.apk`
+   - 最新版本：`/Volumes/tools/apk/octop-v1.0.35.apk`
    - 兼容快捷路径：`/Volumes/tools/apk/octop-v1.0.0.apk`
 3. **Google Drive 云端硬盘 (`octop-apk/`)**：
-   - `octop-v1.0.34.apk`
+   - `octop-v1.0.35.apk`
    - `octop-v1.0.0.apk`
    - 完整工程源码包：`octop-android.zip`
 4. **新加坡中转节点公网直链**：
@@ -210,9 +210,9 @@ server {
 
 ---
 
-## 七、 异常与 Issue 跟踪矩阵 (001 ~ 030)
+## 七、 异常与 Issue 跟踪矩阵 (001 ~ 034)
 
-在项目 `issue/` 目录下完整维护了迭代历程中的 30 项深度技术归档：
+在项目 `issue/` 目录下完整维护了迭代历程中的 34 项深度技术归档：
 
 | 编号 | 文档名称 | 核心解决问题 |
 | :--- | :--- | :--- |
@@ -249,3 +249,4 @@ server {
 | **031** | `031-code-review-optimizations-and-repository-refactoring.md` | 深度 Code Review 采纳落地：动态代理单例缓存、401 自动失效拦截、HttpUrl 安全重构、数据仓库层 (OctopRepository) 与附件上传管线 (AttachmentUploadPipeline) 架构解耦，字号自适应及 Compose 渲染优化 |
 | **032** | `032-fix-duplicate-provider-prefix-in-model-display.md` | 修复 AI 响应卡片底部模型元数据重复服务商标称问题 (去除多重 `ice / Ice /` 叠词并保持 `GPT-6.1 Sol` 连字符规范) |
 | **033** | `033-foreground-auto-resume-and-manual-refresh.md` | 切后台返回前台生命周期感知自动同步、云端完成态自愈与顶部栏快捷刷新按钮支持 |
+| **034** | `034-drawer-back-press-and-double-back-to-exit.md` | 侧边栏抽屉返回键平滑收起至主聊天窗口，与主界面 2 秒内双击防误触退出机制 |
