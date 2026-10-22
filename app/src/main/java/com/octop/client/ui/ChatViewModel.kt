@@ -378,18 +378,22 @@ class ChatViewModel : ViewModel() {
                 onSuccess = { list ->
                     if (list.isNotEmpty()) {
                         _agents.value = list
-                        if (_currentAgent.value == null) {
-                            selectAgent(list.first())
+                        val enabledList = list.filter { it.isAgentEnabled }
+                        val target = enabledList.firstOrNull() ?: list.first()
+                        if (_currentAgent.value == null || !(_currentAgent.value?.isAgentEnabled ?: false)) {
+                            selectAgent(target)
                         }
                     } else if (_agents.value.isEmpty()) {
                         _agents.value = defaultExperts
-                        selectAgent(defaultExperts.first())
+                        val enabledDefault = defaultExperts.filter { it.isAgentEnabled }
+                        selectAgent(enabledDefault.firstOrNull() ?: defaultExperts.first())
                     }
                 },
                 onFailure = {
                     if (_agents.value.isEmpty()) {
                         _agents.value = defaultExperts
-                        selectAgent(defaultExperts.first())
+                        val enabledDefault = defaultExperts.filter { it.isAgentEnabled }
+                        selectAgent(enabledDefault.firstOrNull() ?: defaultExperts.first())
                     }
                 }
             )
@@ -1765,14 +1769,14 @@ class ChatViewModel : ViewModel() {
 
     companion object {
         val defaultExperts = listOf(
-            AgentItem(agentId = "main", name = "小通 · 通用助手", description = "通用敏捷日常助理"),
-            AgentItem(agentId = "KGZ2RP", name = "育儿管家", description = "成长教育与日程打理"),
-            AgentItem(agentId = "AZYKMJ", name = "热点记者", description = "全球科技商业头条洞察"),
-            AgentItem(agentId = "70P5RA", name = "我的持仓专家", description = "证券量化与资产配置参谋"),
-            AgentItem(agentId = "5K92B4", name = "三轨参谋 · 伴行者", description = "工作/生活/健康第二大脑"),
-            AgentItem(agentId = "WTNWE4", name = "运维工程师 Ops", description = "Linux/云服务器排障专家"),
-            AgentItem(agentId = "EY93GH", name = "史官", description = "生活随笔与灵感记忆归档"),
-            AgentItem(agentId = "ZBJ5S3", name = "家庭医生", description = "化验单解读与健康长期追踪")
+            AgentItem(agentId = "main", name = "小通 · 通用助手", description = "通用敏捷日常助理", state = "running"),
+            AgentItem(agentId = "KGZ2RP", name = "育儿管家", description = "成长教育与日程打理", state = "running"),
+            AgentItem(agentId = "AZYKMJ", name = "热点记者", description = "全球科技商业头条洞察", state = "running"),
+            AgentItem(agentId = "70P5RA", name = "我的持仓专家", description = "证券量化与资产配置参谋", state = "running"),
+            AgentItem(agentId = "5K92B4", name = "三轨参谋 · 伴行者", description = "工作/生活/健康第二大脑", state = "running"),
+            AgentItem(agentId = "WTNWE4", name = "运维工程师 Ops", description = "Linux/云服务器排障专家", state = "stopped"),
+            AgentItem(agentId = "EY93GH", name = "史官", description = "生活随笔与灵感记忆归档", state = "running"),
+            AgentItem(agentId = "ZBJ5S3", name = "家庭医生", description = "化验单解读与健康长期追踪", state = "running")
         )
     }
 }

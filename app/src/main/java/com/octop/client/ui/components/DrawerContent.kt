@@ -10,9 +10,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.ArrowRight
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material3.*
@@ -46,7 +46,7 @@ fun DrawerContent(
         drawerContainerColor = MaterialTheme.colorScheme.surface
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // 1. 抽屉顶部头部
+            // 1. 抽屉顶部头部 (保留图标和专家矩阵这几个字)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -68,31 +68,26 @@ fun DrawerContent(
                     }
                 }
                 Spacer(modifier = Modifier.width(12.dp))
-                Column {
-                    Text(
-                        text = "Octop 专家矩阵",
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = "8位专属领域 Agent 参谋",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                Text(
+                    text = "专家矩阵",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
             }
 
-            Divider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+            HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
 
-            // 2. 专家与树状会话列表
+            // 2. 专家与树状会话列表 (只罗列 enable 的专家)
+            val enabledAgents = remember(agents) { agents.filter { it.isAgentEnabled } }
+
             LazyColumn(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
                     .padding(vertical = 8.dp)
             ) {
-                items(agents, key = { it.agentId }) { agent ->
+                items(enabledAgents, key = { it.agentId }) { agent ->
                     val isExpanded = expandedAgentIds.contains(agent.agentId)
                     val isCurrentAgent = currentAgent?.agentId == agent.agentId
                     val threads = agentThreadsMap[agent.agentId] ?: emptyList()
@@ -119,7 +114,7 @@ fun DrawerContent(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
-                                imageVector = if (isExpanded) Icons.Default.ArrowDropDown else Icons.Default.ArrowRight,
+                                imageVector = if (isExpanded) Icons.Default.ArrowDropDown else Icons.AutoMirrored.Filled.ArrowRight,
                                 contentDescription = null,
                                 tint = if (isCurrentAgent) PrimaryGreen else MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(20.dp)
