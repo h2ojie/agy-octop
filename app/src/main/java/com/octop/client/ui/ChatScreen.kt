@@ -18,7 +18,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -651,27 +653,36 @@ fun ChatScreen(
                             }
 
                             items(turn.aiMessages, key = { it.id }) { aiMsg ->
-                                AiResponseCard(
-                                    message = aiMsg,
-                                    currentAgentId = currentAgent?.agentId ?: "",
-                                    onToggleThinking = { viewModel.toggleThinking(aiMsg.id) },
-                                    onHitlDecision = { approve ->
-                                        val aid = currentAgent?.agentId
-                                        val tid = currentThread?.threadId
-                                        if (aid != null && tid != null) {
-                                            viewModel.submitHitlDecision(aid, tid, approve)
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .onVerticalDragOverThreshold(enabled = activeExpandedTurnId != null) {
+                                            DiagnosticLogger.d(DiagnosticLogger.TAG_UI, "AI message vertically dragged, collapsing prompt card: $activeExpandedTurnId")
+                                            activeExpandedTurnId = null
                                         }
-                                    },
-                                    onOpenFile = { att ->
-                                        currentAgent?.agentId?.let { aid ->
-                                            viewModel.downloadAndOpenFile(context, aid, att)
+                                ) {
+                                    AiResponseCard(
+                                        message = aiMsg,
+                                        currentAgentId = currentAgent?.agentId ?: "",
+                                        onToggleThinking = { viewModel.toggleThinking(aiMsg.id) },
+                                        onHitlDecision = { approve ->
+                                            val aid = currentAgent?.agentId
+                                            val tid = currentThread?.threadId
+                                            if (aid != null && tid != null) {
+                                                viewModel.submitHitlDecision(aid, tid, approve)
+                                            }
+                                        },
+                                        onOpenFile = { att ->
+                                            currentAgent?.agentId?.let { aid ->
+                                                viewModel.downloadAndOpenFile(context, aid, att)
+                                            }
+                                        },
+                                        onPreviewImage = { model, title ->
+                                            previewImageModel = model
+                                            previewImageTitle = title
                                         }
-                                    },
-                                    onPreviewImage = { model, title ->
-                                        previewImageModel = model
-                                        previewImageTitle = title
-                                    }
-                                )
+                                    )
+                                }
                             }
                         }
 
@@ -681,6 +692,10 @@ fun ChatScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(bottomSpacerAnimatable.value.dp)
+                                    .onVerticalDragOverThreshold(enabled = activeExpandedTurnId != null) {
+                                        DiagnosticLogger.d(DiagnosticLogger.TAG_UI, "Bottom spacer vertically dragged, collapsing prompt card: $activeExpandedTurnId")
+                                        activeExpandedTurnId = null
+                                    }
                             )
                         }
                     }
@@ -776,3 +791,49 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
     is ContextWrapper -> baseContext.findActivity()
     else -> null
 }
+
+/**
+ * 感知垂直拖拽位移的非消费型手势修饰符。
+ *
+ * 核心设计：
+ * 1. 在 PointerEventPass.Initial 阶段只读监听位移，绝不调用 change.consume()，
+ *    完全不影响子组件（按钮、代码块、复制、展开思考）的原生点击，也不阻断外层 LazyColumn 的平滑惯性滚动；
+ * 2. 严格区分点击（Tap）与垂直拖拽（Vertical Drag）：
+ *    位移在 touchSlop（约 8~16px）以内时判定为点击，绝不触发 onDrag；
+ *    仅当垂直方向位移超过 touchSlop 且垂直位移大于水平位移时，判定为用户划动/拖拽 AI 消息，触发 onDrag 回调；
+ * 3. 一次手势周期（Down -> Move... -> Up）仅触发一次 onDrag，并在 enabled=false 时完全无额外开销。
+ */
+private fun Modifier.onVerticalDragOverThreshold(
+    enabled: Boolean,
+    onDrag: () -> Unit
+): Modifier = if (enabled) {
+    this.pointerInput(enabled) {
+        val touchSlop = viewConfiguration.touchSlop
+        awaitPointerEventScope {
+            while (true) {
+                // 等待手指按下 (Down)
+                val down = awaitPointerEvent(PointerEventPass.Initial)
+                val downChange = down.changes.firstOrNull { it.pressed } ?: continue
+                val downPointerId = downChange.id
+                val downPos = downChange.position
+
+                var triggered = false
+                while (true) {
+                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                    val change = event.changes.firstOrNull { it.id == downPointerId } ?: break
+                    if (!change.pressed) {
+                        break // 手指抬起 (Up)
+                    }
+                    if (!triggered && change.positionChanged()) {
+                        val dy = kotlin.math.abs(change.position.y - downPos.y)
+                        val dx = kotlin.math.abs(change.position.x - downPos.x)
+                        if (dy > touchSlop && dy > dx) {
+                            triggered = true
+                            onDrag()
+                        }
+                    }
+                }
+            }
+        }
+    }
+} else this

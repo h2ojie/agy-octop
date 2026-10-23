@@ -255,3 +255,4 @@ server {
 | **038** | `038-client-diagnostic-logging-and-nas-sync.md` | 移动端异步非阻塞诊断日志系统落地、默认开启开关、手机端代码框预览与云端/NAS/Google Drive一键打包上传 |
 | **039** | `039-fix-user-prompt-card-collapse-on-scroll.md` | 修复提问卡片展开后上下滑动时意外自动收拢问题 (引入 `consumeDragGestures` 防穿透隔离，精准隔离内部滚动与外层列表滑动) |
 | **040** | `040-fix-user-prompt-card-scroll-collapse-and-click-lockout.md` | 修复用户消息框上下滑动自动收起及收起后点击无法重新展开的致命冲突 (移除列表滚动折叠 LaunchedEffect、根除下层 AI 消息点击穿透劫持、吸顶外层 Box 与卡片内部双重原生 clickable 兜底) |
+| **041** | `041-isolate-ai-drag-to-collapse-prompt-card.md` | 方案 A 落地：基于非消费型垂直拖拽感知 (`onVerticalDragOverThreshold`) 完美实现移动 AI 消息时自动收拢提问卡片，提问内部滚动隔离不收拢，收拢后轻触秒开零冲突 |
