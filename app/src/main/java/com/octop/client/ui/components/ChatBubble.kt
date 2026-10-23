@@ -24,6 +24,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -99,6 +102,59 @@ fun groupMessagesIntoTurns(messages: List<ChatMessage>): List<ChatTurn> {
     return turns
 }
 
+/**
+ * 拦截并消费容器内部的拖拽与滑动手势，防止未消费的垂直拖拽指针位移穿透冒泡至外层 LazyColumn。
+ *
+ * 核心机制：
+ * 1. 严格基于 viewConfiguration.touchSlop 区分轻触点击（Tap）与滑动手势（Drag）：
+ *    位移小于 touchSlop 时判定为点击，绝不消费 Down/Up 指针，保证卡片内部的「点击收拢」、「复制」、
+ *    附件缩略图点击以及文本选择等子组件交互 100% 灵敏响应；
+ * 2. 一旦位移超过 touchSlop（确认为手指拖拽或内部滚动）：
+ *    在 PointerEventPass.Main 上消费后续所有发生位移的指针变更，使外层 LazyColumn 无法捕获该拖拽手势，
+ *    彻底避免外层 LazyColumn 的 interactionSource 误触发 isListDragged 并异常收拢提问卡片。
+ */
+fun Modifier.consumeDragGestures(
+    enabled: Boolean = true
+): Modifier = if (enabled) {
+    this.pointerInput(Unit) {
+        val touchSlop = viewConfiguration.touchSlop
+        awaitPointerEventScope {
+            while (true) {
+                // 等待手指按下 (Down)
+                val downEvent = awaitPointerEvent(PointerEventPass.Main)
+                val downChange = downEvent.changes.firstOrNull { it.pressed } ?: continue
+                val downPointerId = downChange.id
+                val downPosition = downChange.position
+                var isDrag = false
+
+                // 持续跟踪当前手势指针移动与抬起
+                while (true) {
+                    val event = awaitPointerEvent(PointerEventPass.Main)
+                    val change = event.changes.firstOrNull { it.id == downPointerId } ?: break
+                    if (!change.pressed) {
+                        // 手指抬起 (Up)
+                        break
+                    }
+                    if (change.positionChanged()) {
+                        val currentPosition = change.position
+                        val dragDistance = (currentPosition - downPosition).getDistance()
+                        if (dragDistance > touchSlop) {
+                            isDrag = true
+                        }
+                        if (isDrag) {
+                            event.changes.forEach { c ->
+                                if (c.positionChanged()) {
+                                    c.consume()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+} else this
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun UserPromptCard(
@@ -127,8 +183,14 @@ fun UserPromptCard(
     val configuration = LocalConfiguration.current
     val scrollState = rememberScrollState()
 
+    LaunchedEffect(isCollapsed) {
+        if (isCollapsed) {
+            scrollState.scrollTo(0)
+        }
+    }
+
     val showHeader = true
-    val maxContentHeight = (configuration.screenHeightDp * 0.38f).coerceIn(160f, 300f).dp
+    val maxContentHeight = (configuration.screenHeightDp * 0.42f).coerceIn(160f, 360f).dp
 
     // 拦截内部滚动溢出，阻断嵌套滚动冒泡给外层 LazyColumn，
     // 防止在提问框内上下滑动时拉扯到后面的 AI 回复或上一轮对话
@@ -173,7 +235,9 @@ fun UserPromptCard(
             .animateContentSize()
             .then(
                 if (!isCollapsed) {
-                    Modifier.nestedScroll(stopNestedScrollConnection)
+                    Modifier
+                        .nestedScroll(stopNestedScrollConnection)
+                        .consumeDragGestures(enabled = true)
                 } else Modifier
             )
             .then(

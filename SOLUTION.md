@@ -253,3 +253,4 @@ server {
 | **036** | `036-fix-multi-page-history-ordering-and-latest-scroll.md` | 修复超长历史跨页分页拼接倒序、本地持久化缓存时间自愈与初次切入/刷新自动置底定位 |
 | **037** | `037-fix-user-prompt-card-expand-click.md` | 修复置顶提问单行卡片点击展不开问题 (移除外层全屏点击拦截，替换为 `collectIsDraggedAsState` 滚动感知) |
 | **038** | `038-client-diagnostic-logging-and-nas-sync.md` | 移动端异步非阻塞诊断日志系统落地、默认开启开关、手机端代码框预览与云端/NAS/Google Drive一键打包上传 |
+| **039** | `039-fix-user-prompt-card-collapse-on-scroll.md` | 修复提问卡片展开后上下滑动时意外自动收拢问题 (引入 `consumeDragGestures` 防穿透隔离，精准隔离内部滚动与外层列表滑动) |

@@ -118,11 +118,12 @@ fun ChatScreen(
     }
 
     // 核心交互规范 (对标 Antigravity)：当聊天列表发生用户手指拖拽滑动时，提问卡片自动收拢为单行
-    // 注意：必须使用 collectIsDraggedAsState，避免在卡片展开动画/测量调整/微触时误触发收拢
+    // 注意：必须使用 collectIsDraggedAsState，避免在卡片展开动画/测量调整/微触时误触发收拢；
+    // 提问卡片内部展开后的滑动手势已由 consumeDragGestures 隔离消费，绝不穿透触发此处的自动收拢。
     val isListDragged by listState.interactionSource.collectIsDraggedAsState()
     LaunchedEffect(isListDragged) {
         if (isListDragged && activeExpandedTurnId != null) {
-            DiagnosticLogger.d(DiagnosticLogger.TAG_UI, "LazyColumn touch dragged, auto-collapsing prompt card")
+            DiagnosticLogger.d(DiagnosticLogger.TAG_UI, "LazyColumn touch dragged (outside prompt card), auto-collapsing prompt card: $activeExpandedTurnId")
             activeExpandedTurnId = null
         }
     }
@@ -618,12 +619,14 @@ fun ChatScreen(
                                     }
                                     val isCollapsed = activeExpandedTurnId != turn.id
 
-                                    // 置顶吸顶卡片容器：铺满屏幕底色，彻底防止下方 AI 长文在滚动时在背后重叠透出
+                                    // 置顶吸顶卡片容器：铺满屏幕底色，彻底防止下方 AI 长文在滚动时在背后重叠透出；
+                                    // 展开状态下通过 consumeDragGestures 消费手势拖拽位移，防止内部滚动穿透至外层 LazyColumn
                                     Box(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .background(MaterialTheme.colorScheme.background)
                                             .padding(horizontal = 12.dp, vertical = 4.dp)
+                                            .consumeDragGestures(enabled = !isCollapsed)
                                     ) {
                                         UserPromptCard(
                                             message = turn.userMessage,
