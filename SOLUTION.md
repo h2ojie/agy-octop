@@ -197,12 +197,12 @@ server {
 
 ### 6.2 自动化分发矩阵
 编译完成后，安装包与源码包会自动同步至以下分发节点：
-1. **本地工程目录**：`/Users/konglingling/agy-octop/octop-v1.0.36.apk`
+1. **本地工程目录**：`/Users/konglingling/agy-octop/octop-v1.0.37.apk`
 2. **局域网共享工具盘**：
-   - 最新版本：`/Volumes/tools/apk/octop-v1.0.36.apk`
+   - 最新版本：`/Volumes/tools/apk/octop-v1.0.37.apk`
    - 兼容快捷路径：`/Volumes/tools/apk/octop-v1.0.0.apk`
 3. **Google Drive 云端硬盘 (`octop-apk/`)**：
-   - `octop-v1.0.36.apk`
+   - `octop-v1.0.37.apk`
    - `octop-v1.0.0.apk`
    - 完整工程源码包：`octop-android.zip`
 4. **新加坡中转节点公网直链**：
@@ -210,9 +210,9 @@ server {
 
 ---
 
-## 七、 异常与 Issue 跟踪矩阵 (001 ~ 035)
+## 七、 异常与 Issue 跟踪矩阵 (001 ~ 036)
 
-在项目 `issue/` 目录下完整维护了迭代历程中的 35 项深度技术归档：
+在项目 `issue/` 目录下完整维护了迭代历程中的 36 项深度技术归档：
 
 | 编号 | 文档名称 | 核心解决问题 |
 | :--- | :--- | :--- |
@@ -251,3 +251,4 @@ server {
 | **033** | `033-foreground-auto-resume-and-manual-refresh.md` | 切后台返回前台生命周期感知自动同步、云端完成态自愈与顶部栏快捷刷新按钮支持 |
 | **034** | `034-drawer-back-press-and-double-back-to-exit.md` | 侧边栏抽屉返回键平滑收起至主聊天窗口，与主界面 2 秒内双击防误触退出机制 |
 | **035** | `035-drawer-filter-enabled-experts-and-clean-header.md` | 侧边栏专家矩阵仅罗列 Enabled 专家，抽屉头部保留绿底图标与极简「专家矩阵」标题 |
+| **036** | `036-fix-multi-page-history-ordering-and-latest-scroll.md` | 修复超长历史跨页分页拼接倒序、本地持久化缓存时间自愈与初次切入/刷新自动置底定位 |

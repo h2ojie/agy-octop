@@ -131,6 +131,23 @@ fun ChatScreen(
         map
     }
 
+    // 切换会话或初次加载完毕时，自动定位至最新消息处 (列表底部)
+    var lastScrolledThreadId by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(currentThread?.threadId, turns.isNotEmpty()) {
+        val tid = currentThread?.threadId
+        if (!tid.isNullOrBlank() && turns.isNotEmpty() && lastScrolledThreadId != tid) {
+            lastScrolledThreadId = tid
+            kotlinx.coroutines.delay(80L)
+            val total = listState.layoutInfo.totalItemsCount
+            if (total > 0) {
+                listState.scrollToItem((total - 1).coerceAtLeast(0))
+            } else if (turns.isNotEmpty()) {
+                val lastHeader = turnHeaderIndices[turns.size - 1] ?: 0
+                listState.scrollToItem(lastHeader)
+            }
+        }
+    }
+
     val configuration = LocalConfiguration.current
     // 动态底部视口缓冲空间：
     // 1. 发送消息（isStreaming == true）时：通过 snapTo 立即瞬间达到 85% 视口高度（0 延迟），确保 LazyColumn 能够绝对置顶吸顶；
@@ -383,6 +400,13 @@ fun ChatScreen(
                         IconButton(
                             onClick = {
                                 viewModel.refreshCurrentThread(showToast = true)
+                                coroutineScope.launch {
+                                    kotlinx.coroutines.delay(120L)
+                                    val total = listState.layoutInfo.totalItemsCount
+                                    if (total > 0) {
+                                        listState.animateScrollToItem((total - 1).coerceAtLeast(0))
+                                    }
+                                }
                             },
                             modifier = Modifier.size(36.dp)
                         ) {
@@ -416,6 +440,13 @@ fun ChatScreen(
                                     onClick = {
                                         showTopMenu = false
                                         viewModel.refreshCurrentThread(showToast = true)
+                                        coroutineScope.launch {
+                                            kotlinx.coroutines.delay(120L)
+                                            val total = listState.layoutInfo.totalItemsCount
+                                            if (total > 0) {
+                                                listState.animateScrollToItem((total - 1).coerceAtLeast(0))
+                                            }
+                                        }
                                     }
                                 )
                                 DropdownMenuItem(

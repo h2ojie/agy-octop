@@ -273,13 +273,27 @@ class ChatViewModel : ViewModel() {
             val file = File(cacheDir, "$threadId.json")
             if (file.exists() && file.isFile) {
                 val type = object : TypeToken<List<ChatMessage>>() {}.type
-                gson.fromJson<List<ChatMessage>>(file.readText(), type)
+                val loaded: List<ChatMessage>? = gson.fromJson(file.readText(), type)
+                sanitizeCachedMessages(loaded)
             } else {
                 null
             }
         } catch (e: Exception) {
             Log.e("ChatViewModel", "Failed to load thread $threadId from disk", e)
             null
+        }
+    }
+
+    private fun sanitizeCachedMessages(messages: List<ChatMessage>?): List<ChatMessage>? {
+        if (messages.isNullOrEmpty()) return messages
+        // 若历史磁盘缓存因旧版分页拼接导致时间戳发生倒流乱序，按时间戳稳定重排恢复正序
+        val hasTimeInversion = messages.zipWithNext().any { (prev, next) ->
+            prev.timestamp > 0 && next.timestamp > 0 && prev.timestamp > next.timestamp + 5000L
+        }
+        return if (hasTimeInversion) {
+            messages.sortedBy { it.timestamp }
+        } else {
+            messages
         }
     }
 
@@ -609,14 +623,16 @@ class ChatViewModel : ViewModel() {
         val thread = _currentThread.value
         val tid = thread?.threadId ?: _agentActiveThreadId[agent.agentId]
         if (!tid.isNullOrBlank() && !tid.startsWith("draft_")) {
-            val ws = getOrCreateWs(agent.agentId, tid)
-            if (ws.isConnected) {
-                ws.subscribe(tid)
-            } else {
-                ws.connect(tid)
+            viewModelScope.launch {
+                val ws = getOrCreateWs(agent.agentId, tid)
+                if (ws.isConnected) {
+                    ws.subscribe(tid)
+                } else {
+                    ws.connect(tid)
+                }
+                loadHistory(agent.agentId, tid)
+                loadThreadsForAgent(agent.agentId)
             }
-            loadHistory(agent.agentId, tid)
-            loadThreadsForAgent(agent.agentId)
         }
     }
 
@@ -637,10 +653,9 @@ class ChatViewModel : ViewModel() {
         }
     }
 
-    private fun loadHistory(agentId: String, threadId: String) {
-        viewModelScope.launch {
-            try {
-                val allRawPages = mutableListOf<List<HistoryMessageDto>>()
+    private suspend fun loadHistory(agentId: String, threadId: String) {
+        try {
+            val allRawPages = mutableListOf<List<HistoryMessageDto>>()
                 var currentOffset = 0
                 val pageSize = 200
                 var hasMore = true
@@ -668,7 +683,18 @@ class ChatViewModel : ViewModel() {
                     iterations++
                 }
 
-                val allDtos = allRawPages.flatten()
+                // 服务端按 seq DESC 分页并在每页内部 reverse()，导致较旧的页在后；
+                // 必须将页序列反转 (allRawPages.reversed()) 后展平，才能使整条会话严格按时间正序排列至最新消息
+                val rawDtos = allRawPages.reversed().flatten()
+                val seenIds = mutableSetOf<String>()
+                val allDtos = rawDtos.filter { dto ->
+                    val id = dto.id
+                    if (!id.isNullOrBlank()) {
+                        seenIds.add(id)
+                    } else {
+                        true
+                    }
+                }
                 val serverMessages = processDialogueHistory(allDtos, agentId, threadId)
                 val list = _threadMessagesCache.getOrPut(threadId) { mutableListOf() }
 
@@ -732,7 +758,6 @@ class ChatViewModel : ViewModel() {
                 }
             } catch (_: Exception) {}
         }
-    }
 
     private fun processDialogueHistory(
         dtos: List<HistoryMessageDto>,
