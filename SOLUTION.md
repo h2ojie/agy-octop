@@ -253,3 +253,4 @@ server {
 | **035** | `035-drawer-filter-enabled-experts-and-clean-header.md` | 侧边栏专家矩阵仅罗列 Enabled 专家，抽屉头部保留绿底图标与极简「专家矩阵」标题 |
 | **036** | `036-fix-multi-page-history-ordering-and-latest-scroll.md` | 修复超长历史跨页分页拼接倒序、本地持久化缓存时间自愈与初次切入/刷新自动置底定位 |
 | **037** | `037-fix-user-prompt-card-expand-click.md` | 修复置顶提问单行卡片点击展不开问题 (移除外层全屏点击拦截，替换为 `collectIsDraggedAsState` 滚动感知) |
+| **038** | `038-client-diagnostic-logging-and-nas-sync.md` | 移动端异步非阻塞诊断日志系统落地、默认开启开关、手机端代码框预览与云端/NAS/Google Drive一键打包上传 |

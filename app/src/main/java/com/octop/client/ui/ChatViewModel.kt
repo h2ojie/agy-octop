@@ -1,34 +1,28 @@
 package com.octop.client.ui
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.util.Log
+import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.gson.Gson
+import com.google.gson.JsonElement
 import com.google.gson.JsonParser
 import com.google.gson.reflect.TypeToken
 import com.octop.client.OctopApp
-import com.octop.client.data.model.AgentItem
-import com.octop.client.data.model.AttachmentItem
-import com.octop.client.data.model.AttachmentStatus
-import com.octop.client.data.model.ChatMessage
-import com.octop.client.data.model.DEFAULT_RESOLVED_MODELS
-import com.octop.client.data.model.HistoryMessageDto
-import com.octop.client.data.model.HitlDecision
-import com.octop.client.data.model.HitlPendingInfo
-import com.octop.client.data.model.HitlResumeBody
-import com.octop.client.data.model.MessageParser
-import com.octop.client.data.model.QueuedMessage
-import com.octop.client.data.model.ResolvedModel
-import com.octop.client.data.model.ThreadItem
+import com.octop.client.data.model.*
 import com.octop.client.data.network.ApiClient
 import com.octop.client.data.network.LoginRequest
-import com.google.gson.JsonElement
 import com.octop.client.data.network.NetworkConfig
 import com.octop.client.data.network.OctopWebSocketManager
 import com.octop.client.data.repository.OctopRepository
 import com.octop.client.util.AttachmentUploadPipeline
+import com.octop.client.util.DiagnosticLogger
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.asRequestBody
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -242,6 +236,92 @@ class ChatViewModel : ViewModel() {
 
     private val _loginError = MutableStateFlow<String?>(null)
     val loginError: StateFlow<String?> = _loginError.asStateFlow()
+
+    // 系统诊断与日志状态
+    private val _isLoggingEnabled = MutableStateFlow(DiagnosticLogger.isLoggingEnabled(OctopApp.instance))
+    val isLoggingEnabled: StateFlow<Boolean> = _isLoggingEnabled.asStateFlow()
+
+    private val _isUploadingLogs = MutableStateFlow(false)
+    val isUploadingLogs: StateFlow<Boolean> = _isUploadingLogs.asStateFlow()
+
+    fun setLoggingEnabled(enabled: Boolean) {
+        DiagnosticLogger.setLoggingEnabled(OctopApp.instance, enabled)
+        _isLoggingEnabled.value = enabled
+        _toastMessage.value = if (enabled) "已开启诊断日志记录" else "已关闭诊断日志记录"
+    }
+
+    fun uploadDiagnosticLogs(context: Context) {
+        if (_isUploadingLogs.value) return
+        _isUploadingLogs.value = true
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val zipFile = DiagnosticLogger.packageLogsToZip(context)
+                if (zipFile == null || !zipFile.exists() || zipFile.length() == 0L) {
+                    withContext(Dispatchers.Main) {
+                        _toastMessage.value = "暂无可上传的诊断日志"
+                    }
+                    return@launch
+                }
+                val targetAid = _currentAgent.value?.agentId?.ifBlank { "default" } ?: "default"
+                val mediaType = "application/zip".toMediaTypeOrNull()
+                val requestBody = zipFile.asRequestBody(mediaType)
+                val part = MultipartBody.Part.createFormData("file", zipFile.name, requestBody)
+                val resp = ApiClient.api.uploadAttachment(targetAid, part)
+                withContext(Dispatchers.Main) {
+                    if (resp.isSuccessful) {
+                        _toastMessage.value = "日志已上传至云端并归档至 Mac/NAS！"
+                        DiagnosticLogger.i(DiagnosticLogger.TAG_STATE, "Diagnostic logs uploaded successfully: ${zipFile.name}")
+                    } else {
+                        _toastMessage.value = "上传失败: HTTP ${resp.code()}"
+                        DiagnosticLogger.e(DiagnosticLogger.TAG_STATE, "Failed to upload diagnostic logs: ${resp.code()}")
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    _toastMessage.value = "上传异常: ${e.localizedMessage ?: "网络错误"}"
+                }
+                DiagnosticLogger.e(DiagnosticLogger.TAG_STATE, "Exception uploading diagnostic logs", e)
+            } finally {
+                _isUploadingLogs.value = false
+            }
+        }
+    }
+
+    fun shareDiagnosticLogs(context: Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val zipFile = DiagnosticLogger.packageLogsToZip(context)
+                if (zipFile == null || !zipFile.exists() || zipFile.length() == 0L) {
+                    withContext(Dispatchers.Main) {
+                        _toastMessage.value = "暂无日志可导出"
+                    }
+                    return@launch
+                }
+                val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", zipFile)
+                val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = "application/zip"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    putExtra(Intent.EXTRA_SUBJECT, "Octop 移动端诊断日志")
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                val chooser = Intent.createChooser(sendIntent, "导出/分享诊断日志至 Google Drive 或 NAS").apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(chooser)
+                DiagnosticLogger.i(DiagnosticLogger.TAG_STATE, "Diagnostic logs exported via system share: ${zipFile.name}")
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    _toastMessage.value = "分享导出失败: ${e.localizedMessage ?: "未知错误"}"
+                }
+                DiagnosticLogger.e(DiagnosticLogger.TAG_STATE, "Exception sharing diagnostic logs", e)
+            }
+        }
+    }
+
+    fun clearDiagnosticLogs(context: Context) {
+        DiagnosticLogger.clearAllLogs(context)
+        _toastMessage.value = "本地运行日志已清空"
+    }
 
     // 1. 线程级消息缓存：threadId -> List<ChatMessage>
     private val _threadMessagesCache = ConcurrentHashMap<String, MutableList<ChatMessage>>()

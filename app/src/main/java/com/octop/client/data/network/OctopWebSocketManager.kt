@@ -8,6 +8,7 @@ import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.octop.client.data.model.HitlActionRequest
 import com.octop.client.data.model.HitlPendingInfo
+import com.octop.client.util.DiagnosticLogger
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
@@ -73,6 +74,7 @@ class OctopWebSocketManager(
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 isConnected = true
                 Log.d("OctopWS", "WebSocket connected for agent $agentId (thread: $activeThreadId)")
+                DiagnosticLogger.i(DiagnosticLogger.TAG_WS, "WS connected: agent=$agentId, thread=$activeThreadId, httpCode=${response.code}")
                 mainHandler.post {
                     onConnectionChange(true)
                     // 如果有已有会话，发送 subscribe 续接状态
@@ -163,10 +165,12 @@ class OctopWebSocketManager(
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 isConnected = false
                 Log.w("OctopWS", "WebSocket failure: ${t.localizedMessage}")
+                DiagnosticLogger.w(DiagnosticLogger.TAG_WS, "WS failure for agent $agentId (thread: $activeThreadId, code: ${response?.code}): ${t.message}", t)
                 mainHandler.post {
                     onConnectionChange(false)
                     onError(activeThreadId, t.localizedMessage ?: "WebSocket 连接断开")
                     if (!isManuallyClosed) {
+                        DiagnosticLogger.i(DiagnosticLogger.TAG_WS, "Scheduling WS reconnect in 2s for agent $agentId")
                         mainHandler.postDelayed(reconnectRunnable, 2000)
                     }
                 }
@@ -175,9 +179,11 @@ class OctopWebSocketManager(
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 isConnected = false
                 Log.d("OctopWS", "WebSocket closed: code=$code, reason=$reason")
+                DiagnosticLogger.i(DiagnosticLogger.TAG_WS, "WS closed for agent $agentId, code=$code, reason=$reason")
                 mainHandler.post {
                     onConnectionChange(false)
                     if (!isManuallyClosed && code != 1000) {
+                        DiagnosticLogger.i(DiagnosticLogger.TAG_WS, "Scheduling WS reconnect after close for agent $agentId")
                         mainHandler.postDelayed(reconnectRunnable, 2000)
                     }
                 }

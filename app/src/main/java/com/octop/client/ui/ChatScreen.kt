@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.AddComment
+import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Menu
@@ -54,6 +55,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.octop.client.data.model.AttachmentStatus
 import com.octop.client.data.network.NetworkConfig
 import com.octop.client.ui.components.*
+import com.octop.client.util.DiagnosticLogger
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -103,6 +105,10 @@ fun ChatScreen(
     val currentSelectedEffort by viewModel.currentSelectedEffort.collectAsState()
     var showModelBottomSheet by remember { mutableStateOf(false) }
 
+    val isLoggingEnabled by viewModel.isLoggingEnabled.collectAsState()
+    val isUploadingLogs by viewModel.isUploadingLogs.collectAsState()
+    var showDiagnosticModal by remember { mutableStateOf(false) }
+
     // 交互轮次重组与当前唯一展开的提问卡片 ID (为空时全部自动收拢为单行，对标 Antigravity Web)
     val turns = remember(messages) { groupMessagesIntoTurns(messages) }
     var activeExpandedTurnId by remember { mutableStateOf<String?>(null) }
@@ -116,6 +122,7 @@ fun ChatScreen(
     val isListDragged by listState.interactionSource.collectIsDraggedAsState()
     LaunchedEffect(isListDragged) {
         if (isListDragged && activeExpandedTurnId != null) {
+            DiagnosticLogger.d(DiagnosticLogger.TAG_UI, "LazyColumn touch dragged, auto-collapsing prompt card")
             activeExpandedTurnId = null
         }
     }
@@ -485,6 +492,14 @@ fun ChatScreen(
                                         viewModel.openLoginDialog()
                                     }
                                 )
+                                DropdownMenuItem(
+                                    text = { Text("诊断与系统日志") },
+                                    leadingIcon = { Icon(Icons.Default.Analytics, contentDescription = null) },
+                                    onClick = {
+                                        showTopMenu = false
+                                        showDiagnosticModal = true
+                                    }
+                                )
                             }
                         }
                     }
@@ -615,7 +630,9 @@ fun ChatScreen(
                                             isSticky = isSticky,
                                             isCollapsed = isCollapsed,
                                             onToggleExpand = {
-                                                activeExpandedTurnId = if (activeExpandedTurnId == turn.id) null else turn.id
+                                                val nextId = if (activeExpandedTurnId == turn.id) null else turn.id
+                                                DiagnosticLogger.d(DiagnosticLogger.TAG_UI, "Prompt card toggled for turn: ${turn.id}, expanding=${nextId != null}")
+                                                activeExpandedTurnId = nextId
                                             },
                                             currentAgentId = currentAgent?.agentId ?: "",
                                             onOpenFile = { att ->
@@ -759,6 +776,18 @@ fun ChatScreen(
         onSelectModel = { modelRef, effort ->
             viewModel.selectModel(modelRef, effort)
         }
+    )
+
+    // 系统诊断与运行日志弹窗
+    DiagnosticModal(
+        visible = showDiagnosticModal,
+        isLoggingEnabled = isLoggingEnabled,
+        isUploading = isUploadingLogs,
+        onDismiss = { showDiagnosticModal = false },
+        onToggleLogging = { viewModel.setLoggingEnabled(it) },
+        onUploadLogs = { viewModel.uploadDiagnosticLogs(context) },
+        onShareLogs = { viewModel.shareDiagnosticLogs(context) },
+        onClearLogs = { viewModel.clearDiagnosticLogs(context) }
     )
 }
 

@@ -3,4 +3,6 @@
     <cache-path name="camera_photos" path="camera/" />
     <cache-path name="downloaded_docs" path="downloads/" />
     <cache-path name="compressed_images" path="compressed/" />
+    <cache-path name="diagnostic_zips" path="diagnostic_zips/" />
+    <files-path name="diagnostic_logs" path="diagnostic_logs/" />
 </paths>

@@ -4,11 +4,13 @@ import android.app.Application
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import com.octop.client.data.network.ApiClient
+import com.octop.client.util.DiagnosticLogger
 
 class OctopApp : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        DiagnosticLogger.init(this)
     }
 
     override fun newImageLoader(): ImageLoader {
