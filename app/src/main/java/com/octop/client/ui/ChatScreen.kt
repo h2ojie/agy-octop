@@ -17,7 +17,6 @@ import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
@@ -115,17 +114,6 @@ fun ChatScreen(
 
     LaunchedEffect(currentThread?.threadId) {
         activeExpandedTurnId = null
-    }
-
-    // 核心交互规范 (对标 Antigravity)：当聊天列表发生用户手指拖拽滑动时，提问卡片自动收拢为单行
-    // 注意：必须使用 collectIsDraggedAsState，避免在卡片展开动画/测量调整/微触时误触发收拢；
-    // 提问卡片内部展开后的滑动手势已由 consumeDragGestures 隔离消费，绝不穿透触发此处的自动收拢。
-    val isListDragged by listState.interactionSource.collectIsDraggedAsState()
-    LaunchedEffect(isListDragged) {
-        if (isListDragged && activeExpandedTurnId != null) {
-            DiagnosticLogger.d(DiagnosticLogger.TAG_UI, "LazyColumn touch dragged (outside prompt card), auto-collapsing prompt card: $activeExpandedTurnId")
-            activeExpandedTurnId = null
-        }
     }
 
     // 预计算每个交互轮次在 LazyColumn 中的 Header 索引 (用于精确定位哪个提问卡片当前处于置顶吸顶状态)
@@ -620,13 +608,23 @@ fun ChatScreen(
                                     val isCollapsed = activeExpandedTurnId != turn.id
 
                                     // 置顶吸顶卡片容器：铺满屏幕底色，彻底防止下方 AI 长文在滚动时在背后重叠透出；
-                                    // 展开状态下通过 consumeDragGestures 消费手势拖拽位移，防止内部滚动穿透至外层 LazyColumn
+                                    // 当折叠时容器全宽可点击（含外边距），确保任意位置轻触均可 100% 灵敏展开
                                     Box(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .background(MaterialTheme.colorScheme.background)
                                             .padding(horizontal = 12.dp, vertical = 4.dp)
-                                            .consumeDragGestures(enabled = !isCollapsed)
+                                            .then(
+                                                if (isCollapsed) {
+                                                    Modifier.clickable(
+                                                        interactionSource = remember { MutableInteractionSource() },
+                                                        indication = null
+                                                    ) {
+                                                        DiagnosticLogger.d(DiagnosticLogger.TAG_UI, "Sticky header Box clicked, expanding turn: ${turn.id}")
+                                                        activeExpandedTurnId = turn.id
+                                                    }
+                                                } else Modifier
+                                            )
                                     ) {
                                         UserPromptCard(
                                             message = turn.userMessage,
@@ -634,7 +632,7 @@ fun ChatScreen(
                                             isCollapsed = isCollapsed,
                                             onToggleExpand = {
                                                 val nextId = if (activeExpandedTurnId == turn.id) null else turn.id
-                                                DiagnosticLogger.d(DiagnosticLogger.TAG_UI, "Prompt card toggled for turn: ${turn.id}, expanding=${nextId != null}")
+                                                DiagnosticLogger.d(DiagnosticLogger.TAG_UI, "Prompt card toggled for turn: ${turn.id}, nextState=${if (nextId != null) "EXPANDED" else "COLLAPSED"}")
                                                 activeExpandedTurnId = nextId
                                             },
                                             currentAgentId = currentAgent?.agentId ?: "",
@@ -653,40 +651,27 @@ fun ChatScreen(
                             }
 
                             items(turn.aiMessages, key = { it.id }) { aiMsg ->
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable(
-                                            interactionSource = remember { MutableInteractionSource() },
-                                            indication = null
-                                        ) {
-                                            if (activeExpandedTurnId != null) {
-                                                activeExpandedTurnId = null
-                                            }
+                                AiResponseCard(
+                                    message = aiMsg,
+                                    currentAgentId = currentAgent?.agentId ?: "",
+                                    onToggleThinking = { viewModel.toggleThinking(aiMsg.id) },
+                                    onHitlDecision = { approve ->
+                                        val aid = currentAgent?.agentId
+                                        val tid = currentThread?.threadId
+                                        if (aid != null && tid != null) {
+                                            viewModel.submitHitlDecision(aid, tid, approve)
                                         }
-                                ) {
-                                    AiResponseCard(
-                                        message = aiMsg,
-                                        currentAgentId = currentAgent?.agentId ?: "",
-                                        onToggleThinking = { viewModel.toggleThinking(aiMsg.id) },
-                                        onHitlDecision = { approve ->
-                                            val aid = currentAgent?.agentId
-                                            val tid = currentThread?.threadId
-                                            if (aid != null && tid != null) {
-                                                viewModel.submitHitlDecision(aid, tid, approve)
-                                            }
-                                        },
-                                        onOpenFile = { att ->
-                                            currentAgent?.agentId?.let { aid ->
-                                                viewModel.downloadAndOpenFile(context, aid, att)
-                                            }
-                                        },
-                                        onPreviewImage = { model, title ->
-                                            previewImageModel = model
-                                            previewImageTitle = title
+                                    },
+                                    onOpenFile = { att ->
+                                        currentAgent?.agentId?.let { aid ->
+                                            viewModel.downloadAndOpenFile(context, aid, att)
                                         }
-                                    )
-                                }
+                                    },
+                                    onPreviewImage = { model, title ->
+                                        previewImageModel = model
+                                        previewImageTitle = title
+                                    }
+                                )
                             }
                         }
 
@@ -696,14 +681,6 @@ fun ChatScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(bottomSpacerAnimatable.value.dp)
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null
-                                    ) {
-                                        if (activeExpandedTurnId != null) {
-                                            activeExpandedTurnId = null
-                                        }
-                                    }
                             )
                         }
                     }
