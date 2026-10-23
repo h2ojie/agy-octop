@@ -170,6 +170,7 @@ fun UserPromptCard(
         ),
         modifier = Modifier
             .fillMaxWidth()
+            .animateContentSize()
             .then(
                 if (!isCollapsed) {
                     Modifier.nestedScroll(stopNestedScrollConnection)
@@ -179,7 +180,7 @@ fun UserPromptCard(
                 // 折叠为单行时，点击展开；长按直接复制全部提问内容并弹出 Toast
                 if (isCollapsed) {
                     Modifier.combinedClickable(
-                        onClick = { onToggleExpand() },
+                        onClick = onToggleExpand,
                         onLongClick = {
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                             clipboard.setPrimaryClip(ClipData.newPlainText("提问内容", cleanContent))
@@ -188,7 +189,6 @@ fun UserPromptCard(
                     )
                 } else Modifier
             )
-            .animateContentSize()
     ) {
         if (isCollapsed) {
             // 缩成一行单行模式 (带省略号 + 展开指示图标)
@@ -227,24 +227,16 @@ fun UserPromptCard(
                 )
             }
         } else {
-            // 展开/正常流完整卡片：在卡片整体内捕获手势，确保即使点在内边距或头部也绝不会带动外层答案列表滑动
+            // 展开/正常流完整卡片
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .scrollable(
-                        orientation = Orientation.Vertical,
-                        state = rememberScrollableState { 0f }
-                    )
                     .padding(horizontal = 14.dp, vertical = 10.dp)
             ) {
                 if (showHeader) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .scrollable(
-                                orientation = Orientation.Vertical,
-                                state = rememberScrollableState { 0f }
-                            )
                             .padding(bottom = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
@@ -253,7 +245,8 @@ fun UserPromptCard(
                             text = "提问内容",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.primary
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.clickable { onToggleExpand() }
                         )
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Row(

@@ -17,6 +17,7 @@ import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
@@ -110,9 +111,11 @@ fun ChatScreen(
         activeExpandedTurnId = null
     }
 
-    // 核心交互规范 (对标 Antigravity)：当聊天列表发生任何滑动 (isScrollInProgress)，提问卡片立即自动收拢为一行
-    LaunchedEffect(listState.isScrollInProgress) {
-        if (listState.isScrollInProgress && activeExpandedTurnId != null) {
+    // 核心交互规范 (对标 Antigravity)：当聊天列表发生用户手指拖拽滑动时，提问卡片自动收拢为单行
+    // 注意：必须使用 collectIsDraggedAsState，避免在卡片展开动画/测量调整/微触时误触发收拢
+    val isListDragged by listState.interactionSource.collectIsDraggedAsState()
+    LaunchedEffect(isListDragged) {
+        if (isListDragged && activeExpandedTurnId != null) {
             activeExpandedTurnId = null
         }
     }
@@ -548,13 +551,6 @@ fun ChatScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues)
-                    .pointerInput(Unit) {
-                        detectTapGestures {
-                            if (activeExpandedTurnId != null) {
-                                activeExpandedTurnId = null
-                            }
-                        }
-                    }
             ) {
                 if (messages.isEmpty()) {
                     // 空会话状态：显示专家开场白与功能介绍
