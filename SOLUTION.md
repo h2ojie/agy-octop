@@ -25,7 +25,7 @@ flowchart TD
     end
 
     subgraph RelayServer ["公网中转节点 (新加坡 Lightsail 47.130.249.193)"]
-        Nginx["Nginx 1.24 (SSL Offloading & AppKey Filter & APK Hosting)"]
+        Nginx["Nginx 1.24 (SSL Offloading & AppKey Filter)"]
         TailscaleNodeA["Tailscale Node (100.103.230.122)"]
     end
 
@@ -193,26 +193,25 @@ server {
 ### 6.1 编译环境与工具链
 - **JDK 17**：`/Users/konglingling/.jdks/corretto-17/Contents/Home`
 - **Android SDK**：`/Users/konglingling/Library/Android/sdk` (Target SDK 34)
-- **当前版本**：**v1.0.31** (`versionCode = 32`)
+- **当前版本**：**v1.0.39** (`versionCode = 40`)
 
-### 6.2 自动化分发矩阵
-编译完成后，安装包与源码包会自动同步至以下分发节点：
-1. **本地工程目录**：`/Users/konglingling/agy-octop/octop-v1.0.37.apk`
-2. **局域网共享工具盘**：
-   - 最新版本：`/Volumes/tools/apk/octop-v1.0.37.apk`
+### 6.2 私有化分发规范 (仅 NAS 与 Google Drive)
+根据安全策略与用户要求，自 **v1.0.39** 起，APK 安装包不再向公网 VPS 存放或暴露下载链接，全部归档同步至私有化与内部云盘渠道：
+1. **家庭 NAS 共享盘 (`/Volumes/tools/apk`)**：
+   - 最新版本：`/Volumes/tools/apk/octop-v1.0.39.apk`
    - 兼容快捷路径：`/Volumes/tools/apk/octop-v1.0.0.apk`
-3. **Google Drive 云端硬盘 (`octop-apk/`)**：
-   - `octop-v1.0.37.apk`
-   - `octop-v1.0.0.apk`
-   - 完整工程源码包：`octop-android.zip`
-4. **新加坡中转节点公网直链**：
-   - [http://h2ojie2026.duckdns.org/octop.apk](http://h2ojie2026.duckdns.org/octop.apk)
+2. **Google Drive 云端硬盘 (`octop-apk/`)**：
+   - `octop-v1.0.39.apk`
+   - `octop-android.zip`
+3. **本地工作区归档**：
+   - `/Users/konglingling/agy-octop/octop-v1.0.39.apk`
+   - 自动化分发脚本：[`scripts/distribute_apk.sh`](file:///Users/konglingling/agy-octop/scripts/distribute_apk.sh)
 
 ---
 
-## 七、 异常与 Issue 跟踪矩阵 (001 ~ 036)
+## 七、 异常与 Issue 跟踪矩阵 (001 ~ 038)
 
-在项目 `issue/` 目录下完整维护了迭代历程中的 36 项深度技术归档：
+在项目 `issue/` 目录下完整维护了迭代历程中的 38 项深度技术归档：
 
 | 编号 | 文档名称 | 核心解决问题 |
 | :--- | :--- | :--- |
