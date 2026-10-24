@@ -1047,6 +1047,14 @@ class ChatViewModel : ViewModel() {
                     if (isCurrent) {
                         _isConnected.value = connected
                     }
+                    if (connected && !threadId.startsWith("draft_")) {
+                        // 核心自愈：网络重连成功后，如果该会话处于流式等待或当前会话，自动拉取云端历史核对完成态，防止断线丢失 done 帧导致假死卡住
+                        if (_streamingThreads.contains(threadId) || isCurrent) {
+                            viewModelScope.launch {
+                                loadHistory(agentId, threadId)
+                            }
+                        }
+                    }
                 },
                 onThreadBound = { boundThreadId ->
                     handleWsThreadBound(agentId, boundThreadId)

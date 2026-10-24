@@ -149,6 +149,21 @@ fun ChatScreen(
         }
     }
 
+    // 当产生新交互轮次（如发送新提问）或进入流式响应时，平滑滚动定位至最新消息（列表底部）
+    var lastTurnCount by remember { mutableIntStateOf(turns.size) }
+    LaunchedEffect(turns.size, isStreaming) {
+        if (turns.size > lastTurnCount || (isStreaming && turns.isNotEmpty())) {
+            lastTurnCount = turns.size
+            kotlinx.coroutines.delay(60L)
+            val total = listState.layoutInfo.totalItemsCount
+            if (total > 0) {
+                listState.animateScrollToItem((total - 1).coerceAtLeast(0))
+            }
+        } else {
+            lastTurnCount = turns.size
+        }
+    }
+
     val configuration = LocalConfiguration.current
     // 动态底部视口缓冲空间：
     // 1. 发送消息（isStreaming == true）时：通过 snapTo 立即瞬间达到 85% 视口高度（0 延迟），确保 LazyColumn 能够绝对置顶吸顶；
