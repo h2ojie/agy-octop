@@ -778,16 +778,38 @@ class ChatViewModel : ViewModel() {
                 val serverMessages = processDialogueHistory(allDtos, agentId, threadId)
                 val list = _threadMessagesCache.getOrPut(threadId) { mutableListOf() }
 
+                // 【Issue 043 核心自愈】服务端 thread_messages 是"回合结束后才整体投影落盘"的产物
+                // (processor.py:_record_turn_history 仅在 stream_ok 后调用 append_if_ready)，
+                // 因此在本轮尚未跑完的窗口内，云端历史里【看不到】用户刚刚发出的这条提问。
+                // 若此时按云端快照整体覆盖本地列表，就会把刚发出、正在等待的提问连同 AI 占位块一起抹掉，
+                // 造成「界面没有刷新」的假象 (Issue 042 复现：19:53:03 发出 → 19:53:18 截图只剩上一轮)。
+                // 这里先识别出"本地已发出但云端尚未确认"的待确认消息，后面对齐快照时必须保留它们。
+                val pendingUserMsg = synchronized(list) {
+                    list.lastOrNull { it.isUser && !it.isStreaming }
+                }
+                // 【Issue 043】与"云端最后一条用户消息"比对，而不是"任意一条同文本消息"。
+                // 否则当用户重复发送相同内容（如连续两次"继续"）时，会误命中更早的那条同文本消息，
+                // 从而把真正尚未落盘的当前提问误判为"已确认"并被抹掉。
+                val serverLastUserContent = serverMessages.lastOrNull { it.isUser }?.content?.trim()
+                val serverHasPendingUser = pendingUserMsg != null &&
+                    serverLastUserContent != null &&
+                    serverLastUserContent == pendingUserMsg.content.trim()
+                // 本地存在待确认提问、且云端快照里还没有它 => 本轮仍在服务端处理中（投影滞后）
+                val hasPendingUnackedUser = pendingUserMsg != null && !serverHasPendingUser
+
                 // 核心自愈：若服务端明确指示本轮已结束 (turnActiveOnServer == false)，
                 // 立即解除本地可能因切后台/断线漏收 done 帧而残留的流式锁与看门狗
-                if (!turnActiveOnServer) {
+                // 【Issue 043】但当本地仍有"未获云端确认的提问"时，不能据此判定本轮已结束：
+                // 服务端 turn_active 标记与历史投影都存在滞后，此刻更可能是本轮仍在跑，
+                // 此时解除流式锁会让看门狗超时误杀正在进行的生成。
+                if (!turnActiveOnServer && !hasPendingUnackedUser) {
                     _streamingThreads.remove(threadId)
                     stopStreamingWatchdog(threadId)
                 }
                 val isStreamingNow = _streamingThreads.contains(threadId)
 
                 synchronized(list) {
-                    if (isStreamingNow) {
+                    if (isStreamingNow || hasPendingUnackedUser) {
                         // 保留当前正在流式生成的本轮临时消息（用户消息与 AI 占位块），防止覆盖蒸发
                         val inFlightAi = list.lastOrNull { !it.isUser && it.isStreaming }
                         val inFlightUser = list.lastOrNull { it.isUser }
@@ -795,8 +817,9 @@ class ChatViewModel : ViewModel() {
                         list.clear()
                         list.addAll(serverMessages)
 
-                        // 仅与服务端历史中最后一条用户消息比对，防止历史中同名指令（如"继续"）被误判导致新消息被吞
-                        if (inFlightUser != null && serverMessages.lastOrNull { it.isUser }?.content != inFlightUser.content) {
+                        // 【Issue 043】仅当云端快照里【确实没有】这条待确认提问时才补回本地副本。
+                        // 用 serverHasPendingUser 判定，避免云端已收录时被重复追加（同一条消息显示两遍）。
+                        if (inFlightUser != null && !serverHasPendingUser) {
                             list.add(inFlightUser)
                         }
                         // 如果服务端尚未产生该轮的最终 AI 回复，保留/添加流式占位符
@@ -1054,6 +1077,12 @@ class ChatViewModel : ViewModel() {
                                 loadHistory(agentId, threadId)
                             }
                         }
+                    }
+                    // 【Issue 043】连接建立后补发排队消息。
+                    // 原实现中「连接未就绪时发送的消息」会直接丢弃，且排队队列只在
+                    // handleWsDone 里被消费，一旦没有正在跑的流就永远发不出去。
+                    if (connected) {
+                        dispatchQueuedMessagesOnConnect(agentId, threadId)
                     }
                 },
                 onThreadBound = { boundThreadId ->
@@ -1347,8 +1376,62 @@ class ChatViewModel : ViewModel() {
     private fun startStreamingTimeoutWatchdog(agentId: String, threadId: String) {
         watchdogJobs[threadId]?.cancel()
         watchdogJobs[threadId] = viewModelScope.launch {
-            delay(60_000L) // 60秒无任何响应兜底超时
-            if (_streamingThreads.contains(threadId)) {
+            // 【Issue 043】超时前先向云端核实本轮是否仍在执行。
+            // 上游模型排队/容量不足时，首个 token 可能迟到 3~4 分钟
+            // (实测 2026-10-25 该 provider 首字延迟 97s~231s)，
+            // 此时的"无响应"其实是服务端仍在跑，不能直接判死，
+            // 否则会向用户谎报"服务器响应超时"，而服务端随后仍会正常返回完整答案。
+            var waitedRounds = 0
+            val maxRounds = 4 // 60s * 4 = 最多 4 分钟，与上游最坏排队时长相匹配
+
+            while (waitedRounds < maxRounds) {
+                delay(60_000L) // 60秒无任何响应兜底超时
+                waitedRounds++
+
+                if (!_streamingThreads.contains(threadId)) return@launch // 已收到 done / 被用户停止
+
+                val stillRunningOnServer = runCatching {
+                    repository.getThreadHistory(
+                        agentId = agentId,
+                        threadId = threadId,
+                        limit = 1,
+                        offset = 0
+                    ).getOrNull()?.turn_active == true
+                }.getOrDefault(false)
+
+                if (stillRunningOnServer) {
+                    // 云端确认仍在执行：继续等待，并把占位提示改为"服务端处理中"
+                    DiagnosticLogger.i(
+                        DiagnosticLogger.TAG_STATE,
+                        "Watchdog: server still active for thread=$threadId, round=$waitedRounds, keep waiting"
+                    )
+                    val list = _threadMessagesCache[threadId]
+                    if (list != null) {
+                        synchronized(list) {
+                            if (list.isNotEmpty() && !list.last().isUser) {
+                                val last = list.last()
+                                if (last.content.isEmpty() && last.thinking.isEmpty()) {
+                                    list[list.size - 1] = last.copy(
+                                        content = "⏳ 服务端仍在处理中（上游模型排队较慢），请稍候…",
+                                        isStreaming = true,
+                                        isThinkingExpanded = false
+                                    )
+                                }
+                            }
+                        }
+                        saveThreadToDisk(threadId, synchronized(list) { list.toList() })
+                        if (_currentAgent.value?.agentId == agentId && _currentThread.value?.threadId == threadId) {
+                            _messages.value = synchronized(list) { list.toList() }
+                        }
+                    }
+                    continue
+                }
+
+                // 云端确认本轮已结束（或查询失败），此时才判定超时
+                DiagnosticLogger.w(
+                    DiagnosticLogger.TAG_STATE,
+                    "Watchdog: timeout for thread=$threadId after ${waitedRounds} round(s), server not active"
+                )
                 _streamingThreads.remove(threadId)
                 if (_currentAgent.value?.agentId == agentId && _currentThread.value?.threadId == threadId) {
                     _isStreaming.value = false
@@ -1374,6 +1457,16 @@ class ChatViewModel : ViewModel() {
                     if (_currentAgent.value?.agentId == agentId && _currentThread.value?.threadId == threadId) {
                         _messages.value = synchronized(list) { list.toList() }
                     }
+                }
+                return@launch
+            }
+
+            // 超过最大等待轮次仍未拿到云端确认，按超时处理
+            if (_streamingThreads.contains(threadId)) {
+                _streamingThreads.remove(threadId)
+                if (_currentAgent.value?.agentId == agentId && _currentThread.value?.threadId == threadId) {
+                    _isStreaming.value = false
+                    _toastMessage.value = "服务器响应超时，已停止等待"
                 }
             }
         }
@@ -1651,6 +1744,11 @@ class ChatViewModel : ViewModel() {
             }
             updateCurrentQueuedMessages()
 
+            DiagnosticLogger.i(
+                DiagnosticLogger.TAG_STATE,
+                "sendMessage: queued (thread=$currentTid, queueSize=${qList.size}, len=${promptText.length})"
+            )
+
             // 清理当前会话的草稿文字与待发附件，清空输入框
             currentConversationKey()?.let { key ->
                 _conversationDrafts.remove(key)
@@ -1661,6 +1759,10 @@ class ChatViewModel : ViewModel() {
             return
         }
 
+        DiagnosticLogger.i(
+            DiagnosticLogger.TAG_STATE,
+            "sendMessage: dispatch (thread=$currentTid, len=${promptText.length}, atts=${successfulAttachments.size})"
+        )
         executeSendTurn(agent, currentTid, promptText, successfulAttachments)
     }
 
@@ -1673,7 +1775,26 @@ class ChatViewModel : ViewModel() {
         val ws = getOrCreateWs(agent.agentId, currentTid)
         val targetTid = if (currentTid.startsWith("draft_")) null else currentTid
         if (!ws.isConnected) {
-            _toastMessage.value = "正在连接服务，请稍候重试..."
+            // 【Issue 043】连接未就绪时不能把用户输入直接丢弃：
+            // 原实现只弹一个 Toast 就 return，用户输入凭空消失且永不重发。
+            // 这里改为把消息放进该会话的排队队列，并在 WebSocket 连上后由
+            // dispatchQueuedMessagesOnConnect 统一补发。
+            val queuedMsg = QueuedMessage(
+                text = promptText,
+                attachments = successfulAttachments
+            )
+            val qList = _conversationQueues.getOrPut(currentTid) { mutableListOf() }
+            synchronized(qList) {
+                qList.add(queuedMsg)
+            }
+            updateCurrentQueuedMessages()
+
+            DiagnosticLogger.w(
+                DiagnosticLogger.TAG_STATE,
+                "executeSendTurn: WS not connected, queued for retry (thread=$currentTid, queueSize=${qList.size})"
+            )
+
+            _toastMessage.value = "正在连接服务，消息已排队，连接成功后自动发送..."
             ws.connect(targetTid)
             return
         }
@@ -1688,8 +1809,28 @@ class ChatViewModel : ViewModel() {
             model = activeModel,
             reasoningEffort = activeEffort
         )
+        DiagnosticLogger.i(
+            DiagnosticLogger.TAG_STATE,
+            "executeSendTurn: sendUserTurn sent=$sent (thread=$targetTid, len=${promptText.length})"
+        )
         if (!sent) {
-            _toastMessage.value = "发送失败，正在重新连接..."
+            // 发送失败同样不能丢消息：入队等待重连后补发
+            val queuedMsg = QueuedMessage(
+                text = promptText,
+                attachments = successfulAttachments
+            )
+            val qList = _conversationQueues.getOrPut(currentTid) { mutableListOf() }
+            synchronized(qList) {
+                qList.add(queuedMsg)
+            }
+            updateCurrentQueuedMessages()
+
+            DiagnosticLogger.w(
+                DiagnosticLogger.TAG_STATE,
+                "executeSendTurn: send failed, queued for retry (thread=$targetTid, queueSize=${qList.size})"
+            )
+
+            _toastMessage.value = "发送失败，消息已排队，正在重新连接..."
             ws.reconnect()
             return
         }
@@ -1749,6 +1890,52 @@ class ChatViewModel : ViewModel() {
             val agent = _agents.value.firstOrNull { it.agentId == agentId } ?: _currentAgent.value
             if (agent != null) {
                 executeSendTurn(agent, tid, nextMsg.text, nextMsg.attachments)
+            }
+        }
+    }
+
+    /**
+     * 【Issue 043】WebSocket 连上后补发该会话排队队列中的消息。
+     *
+     * 背景：排队队列原先只在 handleWsDone 中被消费，而 handleWsDone 只在
+     * "上一轮流式结束"时才会触发。若消息是在「连接未就绪」时入队的（此时没有任何
+     * 流在跑），就永远等不到 done，队列里的消息会一直滞留，表现为"消息发出去了但没反应"。
+     * 因此在连接建立时额外做一次补发。
+     */
+    private fun dispatchQueuedMessagesOnConnect(agentId: String, tid: String) {
+        if (tid.startsWith("draft_")) return
+        val qList = _conversationQueues[tid] ?: return
+        val pending = synchronized(qList) { qList.size }
+        if (pending == 0) return
+
+        // 若该会话此刻正在流式生成，则沿用原有语义：等 done 后再接力发送
+        if (_streamingThreads.contains(tid)) return
+
+        DiagnosticLogger.i(
+            DiagnosticLogger.TAG_STATE,
+            "dispatchQueuedMessagesOnConnect: thread=$tid pending=$pending"
+        )
+
+        viewModelScope.launch {
+            val agent = _agents.value.firstOrNull { it.agentId == agentId } ?: _currentAgent.value
+            if (agent == null) return@launch
+            // 逐条补发，避免一次性并发多条把服务端压满
+            while (true) {
+                val q = _conversationQueues[tid] ?: return@launch
+                val nextMsg = synchronized(q) {
+                    if (q.isNotEmpty()) q.removeAt(0) else null
+                } ?: return@launch
+
+                updateCurrentQueuedMessages()
+                executeSendTurn(agent, tid, nextMsg.text, nextMsg.attachments)
+
+                // 本条已发出；等待其进入流式状态后再继续下一条，避免并发发送
+                var waited = 0
+                while (waited < 60 && !_streamingThreads.contains(tid)) {
+                    delay(1_000L)
+                    waited++
+                }
+                if (waited >= 60) return@launch
             }
         }
     }

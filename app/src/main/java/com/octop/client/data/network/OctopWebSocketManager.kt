@@ -259,6 +259,11 @@ class OctopWebSocketManager(
         }
         val sent = ws.send(payload.toString())
         Log.d("OctopWS", "sendUserTurn result: sent=$sent, threadId=$targetTid, attachments=${attachments.size}")
+        // 【Issue 043】把发送行为写入诊断日志，便于线上排障时确认消息是否真正发出
+        DiagnosticLogger.i(
+            DiagnosticLogger.TAG_STATE,
+            "sendUserTurn: sent=$sent, threadId=$targetTid, len=${promptText.length}, attachments=${attachments.size}"
+        )
         return sent
     }
 
