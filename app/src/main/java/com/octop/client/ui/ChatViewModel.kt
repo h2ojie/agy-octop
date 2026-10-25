@@ -1053,6 +1053,13 @@ class ChatViewModel : ViewModel() {
                 onToolCall = { tid, toolName ->
                     handleWsToolCall(agentId, tid ?: threadId, toolName)
                 },
+                onToolResult = { tid ->
+                    // 工具执行结束也代表连接活跃，重置看门狗避免长工具链被误判超时
+                    resetStreamingWatchdog(agentId, tid ?: threadId)
+                },
+                onTurnResumed = { tid, phase ->
+                    handleWsTurnResumed(agentId, tid ?: threadId, phase)
+                },
                 onHitlRequired = { tid, hitlInfo ->
                     handleWsHitlRequired(agentId, tid ?: threadId, hitlInfo)
                 },
@@ -1272,6 +1279,53 @@ class ChatViewModel : ViewModel() {
         }
     }
 
+    /**
+     * 【Issue 044】服务端确认本轮仍在执行（turn.started / turn.resumed / turn_status[active=true]）。
+     *
+     * 作用：
+     * 1. 把该会话标记为流式中，让输入框正确显示「排队发送/停止」而非「发送」；
+     * 2. 重置看门狗 —— 说明服务端确实还在跑，不能按"无响应"判死；
+     * 3. 当占位块仍为空时，把提示从"等待"改为按阶段说明，避免用户误以为卡死。
+     */
+    private fun handleWsTurnResumed(agentId: String, threadId: String?, phase: String?) {
+        val tid = threadId ?: return
+        if (tid.startsWith("draft_")) return
+
+        DiagnosticLogger.i(
+            DiagnosticLogger.TAG_STATE,
+            "turnResumed: thread=$tid, phase=$phase"
+        )
+
+        _streamingThreads.add(tid)
+        resetStreamingWatchdog(agentId, tid)
+
+        val list = _threadMessagesCache[tid]
+        if (list != null) {
+            synchronized(list) {
+                if (list.isNotEmpty() && !list.last().isUser) {
+                    val last = list.last()
+                    if (last.content.isEmpty() && last.thinking.isEmpty()) {
+                        val hint = when (phase) {
+                            "awaiting_tools", "between_model_steps" ->
+                                "⚙️ 服务端仍在执行工具调用，请稍候…"
+                            "streaming_text" ->
+                                "⏳ 服务端仍在生成中，请稍候…"
+                            else ->
+                                "⏳ 服务端仍在处理中，请稍候…"
+                        }
+                        list[list.size - 1] = last.copy(content = hint, isStreaming = true)
+                    }
+                }
+            }
+            saveThreadToDisk(tid, synchronized(list) { list.toList() })
+        }
+
+        if (_currentAgent.value?.agentId == agentId && _currentThread.value?.threadId == tid) {
+            _isStreaming.value = true
+            _messages.value = list?.let { synchronized(it) { it.toList() } } ?: emptyList()
+        }
+    }
+
     private fun handleWsDone(agentId: String, threadId: String?) {
         val tid = threadId ?: return
         stopStreamingWatchdog(tid)
@@ -1382,7 +1436,12 @@ class ChatViewModel : ViewModel() {
             // 此时的"无响应"其实是服务端仍在跑，不能直接判死，
             // 否则会向用户谎报"服务器响应超时"，而服务端随后仍会正常返回完整答案。
             var waitedRounds = 0
-            val maxRounds = 4 // 60s * 4 = 最多 4 分钟，与上游最坏排队时长相匹配
+            // 【Issue 044】只有在"云端确认本轮已结束"时才判超时。
+            // 只要云端持续报告 turn_active=true，就说明服务端确实还在跑
+            // （工具链/上游排队都可能耗时很久，实测有 55 分钟仍在 ssh 工具循环的案例），
+            // 此时谎报"超时"并停止等待是错误的。用户随时可以按停止按钮主动取消。
+            // 这里保留一个很高的绝对上限作为协程兜底，避免无限挂起。
+            val maxRounds = 240 // 60s * 240 = 4 小时绝对上限
 
             while (waitedRounds < maxRounds) {
                 delay(60_000L) // 60秒无任何响应兜底超时
@@ -1390,14 +1449,7 @@ class ChatViewModel : ViewModel() {
 
                 if (!_streamingThreads.contains(threadId)) return@launch // 已收到 done / 被用户停止
 
-                val stillRunningOnServer = runCatching {
-                    repository.getThreadHistory(
-                        agentId = agentId,
-                        threadId = threadId,
-                        limit = 1,
-                        offset = 0
-                    ).getOrNull()?.turn_active == true
-                }.getOrDefault(false)
+                val stillRunningOnServer = isTurnActiveOnServer(agentId, threadId)
 
                 if (stillRunningOnServer) {
                     // 云端确认仍在执行：继续等待，并把占位提示改为"服务端处理中"
@@ -1472,10 +1524,40 @@ class ChatViewModel : ViewModel() {
         }
     }
 
+    /**
+     * 【Issue 044】向云端核实该会话本轮是否仍在执行。
+     * 查询失败时返回 false（保守：无法确认则按"未在运行"处理，由上层决定是否判超时）。
+     */
+    private suspend fun isTurnActiveOnServer(agentId: String, threadId: String): Boolean =
+        runCatching {
+            repository.getThreadHistory(
+                agentId = agentId,
+                threadId = threadId,
+                limit = 1,
+                offset = 0
+            ).getOrNull()?.turn_active == true
+        }.getOrDefault(false)
+
     private fun resetStreamingWatchdog(agentId: String, threadId: String) {
         watchdogJobs[threadId]?.cancel()
         watchdogJobs[threadId] = viewModelScope.launch {
             delay(45_000L) // 流式传输中单块 token 间隔超过 45 秒则超时
+            if (!_streamingThreads.contains(threadId)) return@launch
+
+            // 【Issue 044】单个工具调用可能合法耗时数分钟（如长 ssh/构建命令），
+            // 期间服务端不会推任何 token，若直接判死会误报"连接中断"。
+            // 先向云端核实：仍在执行就继续等，而不是打断一轮正常的生成。
+            var guard = 0
+            while (guard < 240 && isTurnActiveOnServer(agentId, threadId)) {
+                guard++
+                DiagnosticLogger.i(
+                    DiagnosticLogger.TAG_STATE,
+                    "IdleWatchdog: server still active for thread=$threadId, keep waiting (guard=$guard)"
+                )
+                delay(60_000L)
+                if (!_streamingThreads.contains(threadId)) return@launch
+            }
+
             if (_streamingThreads.contains(threadId)) {
                 _streamingThreads.remove(threadId)
                 if (_currentAgent.value?.agentId == agentId && _currentThread.value?.threadId == threadId) {

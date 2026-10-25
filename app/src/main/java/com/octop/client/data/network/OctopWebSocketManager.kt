@@ -21,6 +21,8 @@ class OctopWebSocketManager(
     private val onToken: (threadId: String?, content: String) -> Unit,
     private val onThinking: (threadId: String?, content: String) -> Unit,
     private val onToolCall: (threadId: String?, name: String) -> Unit,
+    private val onToolResult: (threadId: String?) -> Unit = {},
+    private val onTurnResumed: (threadId: String?, phase: String?) -> Unit = { _, _ -> },
     private val onHitlRequired: (threadId: String?, hitlInfo: HitlPendingInfo) -> Unit,
     private val onDone: (threadId: String?) -> Unit,
     private val onError: (threadId: String?, message: String) -> Unit,
@@ -111,6 +113,19 @@ class OctopWebSocketManager(
                                 val name = json.get("name")?.asString ?: "工具调用"
                                 onToolCall(parsedTid, name)
                             }
+                            // 【Issue 044】Harness 实际下发的是 tool_call_chunk（见 octop_harness
+                            // protocols/langgraph.py 的 TOOL_CALL_CHUNK），旧实现只认 tool_call，
+                            // 导致工具执行期间客户端毫无反馈，界面看起来像卡死。
+                            "tool_call_chunk" -> {
+                                val name = json.get("name")?.asString
+                                    ?: json.getAsJsonObject("tool_call")?.get("name")?.asString
+                                    ?: "工具调用"
+                                onToolCall(parsedTid, name)
+                            }
+                            // 工具执行结束：刷新一次活跃时间，避免长工具调用期间被看门狗误判超时
+                            "tool_result" -> {
+                                onToolResult(parsedTid)
+                            }
                             "hitl_required" -> {
                                 val req = json.getAsJsonObject("request")
                                 val actionRequests = mutableListOf<HitlActionRequest>()
@@ -153,7 +168,53 @@ class OctopWebSocketManager(
                             }
                             "turn_status" -> {
                                 val active = json.get("active")?.asBoolean ?: false
-                                if (!active) onDone(parsedTid)
+                                if (!active) {
+                                    onDone(parsedTid)
+                                } else {
+                                    // 【Issue 044】服务端明确告知"本轮仍在执行"。
+                                    // 旧实现忽略此分支，导致：订阅一个卡住的会话时，客户端既不知道
+                                    // 服务端还在跑，也无法据此阻止看门狗误判超时。
+                                    onTurnResumed(
+                                        parsedTid,
+                                        json.get("phase")?.asString
+                                    )
+                                }
+                            }
+                            // 【Issue 044】回合生命周期帧：服务端会在开始时推 turn.started，
+                            // 续跑（含重连补推）时推 turn.resumed，结束时推 turn.ended。
+                            // 旧实现完全没有分支，这些帧被静默丢弃（when 无 else 兜底）。
+                            "turn.started", "turn.resumed" -> {
+                                val phase = json.get("phase")?.asString
+                                DiagnosticLogger.i(
+                                    DiagnosticLogger.TAG_WS,
+                                    "WS $type: thread=$parsedTid, phase=$phase"
+                                )
+                                onTurnResumed(parsedTid, phase)
+                            }
+                            "turn.ended" -> {
+                                DiagnosticLogger.i(
+                                    DiagnosticLogger.TAG_WS,
+                                    "WS turn.ended: thread=$parsedTid, failed=${json.get("failed")}"
+                                )
+                                onDone(parsedTid)
+                            }
+                            // 【Issue 044】steer 队列相关帧：客户端暂不支持排队插话的可视化，
+                            // 但必须消费掉并记录，避免"未知帧被静默丢弃"造成排障盲区。
+                            "steer.ack", "steer.queued", "steer.drained",
+                            "steer.discarded", "steer.queue_snapshot" -> {
+                                DiagnosticLogger.d(
+                                    DiagnosticLogger.TAG_WS,
+                                    "WS $type: thread=$parsedTid"
+                                )
+                            }
+                            // 【Issue 044】兜底：未知/新增帧类型不再静默丢弃。
+                            // 旧实现 when 无 else 分支，服务端新增的任何帧都会被无声吃掉，
+                            // 排障时完全看不到——本次"停止按钮常亮"的排查就因此绕了很久。
+                            else -> {
+                                DiagnosticLogger.d(
+                                    DiagnosticLogger.TAG_WS,
+                                    "WS unhandled frame type=$type, thread=$parsedTid, raw=${text.take(200)}"
+                                )
                             }
                         }
                     }
