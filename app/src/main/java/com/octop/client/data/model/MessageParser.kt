@@ -7,6 +7,13 @@ object MessageParser {
     private val THINK_TAG_REGEX = Pattern.compile("<think>([\\s\\S]*?)</think>", Pattern.CASE_INSENSITIVE)
     private val JAVA_MAP_BLOCK_REGEX = Pattern.compile("\\{type=([a-zA-Z0-9_-]+),\\s*(text|thinking)=([\\s\\S]*?)\\}(?:,\\s*|$)")
 
+    /** Tool results are history metadata, never an assistant answer (even when textual). */
+    fun selectHistoryAnswer(messages: List<HistoryMessageDto>): HistoryMessageDto? =
+        messages.lastOrNull { dto ->
+            dto.role?.lowercase() in setOf("assistant", "ai") &&
+                parse(dto.content, dto.thinking).first.isNotBlank()
+        }
+
     fun parse(content: Any?, fallbackThinking: String? = null): Pair<String, String> {
         val textParts = mutableListOf<String>()
         val thinkingParts = mutableListOf<String>()

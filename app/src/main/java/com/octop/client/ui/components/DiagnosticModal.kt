@@ -154,7 +154,7 @@ fun DiagnosticModal(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // 3. 快捷操作按钮组：上传到 NAS/云端 + 分享导出 + 清空
+                // 3. 快捷操作按钮组：上传到云端 + 分享导出 + 清空（归档由独立同步任务完成）
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -184,7 +184,7 @@ fun DiagnosticModal(
                         } else {
                             Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(5.dp))
-                            Text("上传至NAS/云端", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                            Text("上传至云端", fontSize = 12.sp, fontWeight = FontWeight.Medium)
                         }
                     }
 
