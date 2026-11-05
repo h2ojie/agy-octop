@@ -257,3 +257,6 @@ server {
 | **040** | `040-fix-user-prompt-card-scroll-collapse-and-click-lockout.md` | 修复用户消息框上下滑动自动收起及收起后点击无法重新展开的致命冲突 (移除列表滚动折叠 LaunchedEffect、根除下层 AI 消息点击穿透劫持、吸顶外层 Box 与卡片内部双重原生 clickable 兜底) |
 | **041** | `041-isolate-ai-drag-to-collapse-prompt-card.md` | 方案 A 落地：基于非消费型垂直拖拽感知 (`onVerticalDragOverThreshold`) 完美实现移动 AI 消息时自动收拢提问卡片，提问内部滚动隔离不收拢，收拢后轻触秒开零冲突 |
 | **042** | `042-fix-reconnect-lost-done-and-send-autoscroll.md` | 修复断网重连导致丢失结束帧状态卡死及发新消息未自动置底 (重连自动核验云端完成态与补拉同步、发送新消息平滑滚至最底) |
+| **043** | `043-fix-history-projection-lag-pending-message-wipe.md` | 修复历史消息投影滞后导致本地待处理消息被清除问题 |
+| **044** | `044-fix-stuck-stop-button-turn-lifecycle-frames.md` | 修复停止按钮卡死与轮次生命周期帧监听兜底 |
+| **045** | `045-auto-refresh-expert-matrix-on-drawer-and-foreground.md` | 专家矩阵右滑抽屉与前台恢复自愈自动拉取对齐，专家数量动态扩展至 9 位且支持云端热更新 |

@@ -269,7 +269,7 @@ class ChatViewModel : ViewModel() {
                 val resp = ApiClient.api.uploadAttachment(targetAid, part)
                 withContext(Dispatchers.Main) {
                     if (resp.isSuccessful) {
-                        _toastMessage.value = "日志已上传至云端并归档至 Mac/NAS！"
+                        _toastMessage.value = "诊断日志已上传至云端；Mac/NAS 归档状态尚未确认"
                         DiagnosticLogger.i(DiagnosticLogger.TAG_STATE, "Diagnostic logs uploaded successfully: ${zipFile.name}")
                     } else {
                         _toastMessage.value = "上传失败: HTTP ${resp.code()}"
@@ -473,9 +473,15 @@ class ChatViewModel : ViewModel() {
                     if (list.isNotEmpty()) {
                         _agents.value = list
                         val enabledList = list.filter { it.isAgentEnabled }
-                        val target = enabledList.firstOrNull() ?: list.first()
-                        if (_currentAgent.value == null || !(_currentAgent.value?.isAgentEnabled ?: false)) {
+                        val current = _currentAgent.value
+                        if (current == null || !current.isAgentEnabled) {
+                            val target = enabledList.firstOrNull() ?: list.first()
                             selectAgent(target)
+                        } else {
+                            val updatedCurrent = list.find { it.agentId == current.agentId }
+                            if (updatedCurrent != null && updatedCurrent != current) {
+                                _currentAgent.value = updatedCurrent
+                            }
                         }
                     } else if (_agents.value.isEmpty()) {
                         _agents.value = defaultExperts
@@ -699,6 +705,7 @@ class ChatViewModel : ViewModel() {
     }
 
     fun onForegroundResume() {
+        loadAgents()
         val agent = _currentAgent.value ?: return
         val thread = _currentThread.value
         val tid = thread?.threadId ?: _agentActiveThreadId[agent.agentId]
@@ -874,21 +881,12 @@ class ChatViewModel : ViewModel() {
         fun flushAssistantTurn() {
             if (currentTurnAiMessages.isEmpty()) return
 
-            // 1. 从后往前找到最后一条有实质文本内容的消息作为该轮最终回复 (与 Web 端 splitAssistantTurn 保持严格一致)
-            var answerDto: HistoryMessageDto? = null
-            var answerText = ""
-            var answerThinking = ""
-
-            for (i in currentTurnAiMessages.indices.reversed()) {
-                val dto = currentTurnAiMessages[i]
-                val (text, th) = MessageParser.parse(dto.content, dto.thinking)
-                if (text.isNotBlank()) {
-                    answerDto = dto
-                    answerText = text
-                    answerThinking = th
-                    break
-                }
-            }
+            // 1. 仅 assistant/ai 可作为最终回复；工具输出仍用于下面的工具计数。
+            // 按消息角色而非 JSON 内容过滤，保留用户请求的合法 JSON 回答。
+            val answerDto = MessageParser.selectHistoryAnswer(currentTurnAiMessages)
+            val (answerText, answerThinking) = answerDto?.let {
+                MessageParser.parse(it.content, it.thinking)
+            } ?: Pair("", "")
 
             // 2. 统计整轮工具调用次数，并收集所有中间步骤的思考链
             val turnThinkingParts = mutableListOf<String>()
@@ -2158,7 +2156,9 @@ class ChatViewModel : ViewModel() {
             AgentItem(agentId = "5K92B4", name = "三轨参谋 · 伴行者", description = "工作/生活/健康第二大脑", state = "running"),
             AgentItem(agentId = "WTNWE4", name = "运维工程师 Ops", description = "Linux/云服务器排障专家", state = "stopped"),
             AgentItem(agentId = "EY93GH", name = "史官", description = "生活随笔与灵感记忆归档", state = "running"),
-            AgentItem(agentId = "ZBJ5S3", name = "家庭医生", description = "化验单解读与健康长期追踪", state = "running")
+            AgentItem(agentId = "ZBJ5S3", name = "家庭医生", description = "化验单解读与健康长期追踪", state = "running"),
+            AgentItem(agentId = "3MM121", name = "孔夫子 · 思想导师", description = "知行合一与修己立人智囊", state = "running"),
+            AgentItem(agentId = "jiaoyuan", name = "教员 · 战略实践导师", description = "矛盾论与持久战战略破局参谋", state = "running")
         )
     }
 }

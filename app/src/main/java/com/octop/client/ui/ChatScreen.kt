@@ -196,7 +196,9 @@ fun ChatScreen(
     var backToast by remember { mutableStateOf<Toast?>(null) }
 
     LaunchedEffect(drawerState.isOpen) {
-        if (!drawerState.isOpen) {
+        if (drawerState.isOpen) {
+            viewModel.loadAgents()
+        } else {
             lastBackPressTime = 0L
         }
     }
